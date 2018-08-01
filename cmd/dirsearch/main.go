@@ -62,43 +62,20 @@ var (
 	method    = flag.String("M", "GET", "Request method (HEAD / GET)")
 	ext       = flag.String("e", "", "Extension to add to requests (dirsearch style)")
 	cookie    = flag.String("c", "", "Cookies (format: name=value;name=value)")
-	skip_code = flag.String("x", "", "Status codes to exclude")
+	skip_code = flag.String("x", "", "Status codes to exclude (comma sep)")
 	skip_size = flag.String("s", "", "Skip sizes (comma sep)")
 
 	maxerrors = flag.Uint64("E", 10, "Max. errors before exiting")
-	size_min  = flag.Int64("sm", -1, "Skip size min value")
-	size_max  = flag.Int64("sM", -1, "Skip size max value")
-	threads   = flag.Int("t", 10, "Number of concurrent threads.")
+	size_min  = flag.Int64("sm", -1, "Skip size (min value)")
+	size_max  = flag.Int64("sM", -1, "Skip size (max value)")
+	threads   = flag.Int("t", 10, "Number of concurrent goroutines")
 	timeout   = flag.Int("T", 10, "Timeout before killing the request")
 
-	only200  = flag.Bool("2", false, "Only display responses with 200 status code")
-	follow   = flag.Bool("f", false, "Follow redirects.")
-	wildcard = flag.Bool("sw", false, "Skip wildcard responses")
-	ext_all  = flag.Bool("ef", false, "Add extension to all requests (dirbuster style)")
-	waf      = flag.Bool("waf", false, "Inject 'WAF bypass' headers")
+	only200 = flag.Bool("2", false, "Only display responses with 200 status code")
+	follow  = flag.Bool("f", false, "Follow redirects")
+	ext_all = flag.Bool("ef", false, "Add extension to all requests (dirbuster style)")
+	waf     = flag.Bool("waf", false, "Inject 'WAF bypass' headers")
 )
-
-// asks for $rand and will return true if 200 or
-// not included in the fail codes
-func IsWildcard(url string) bool {
-	test := uuid.Must(uuid.NewV4(), nil).String()
-	res, err := client.Get(*base + test)
-
-	if err != nil {
-		return false
-	}
-
-	defer res.Body.Close()
-	_, _ = io.Copy(ioutil.Discard, res.Body)
-
-	if res.StatusCode == http.StatusOK || !skip_codes[res.StatusCode] {
-		*wildcard = false
-		return true
-	}
-
-	*wildcard = false
-	return false
-}
 
 // check if host is alive before going all the trouble
 func IsAlive(url string) bool {
@@ -138,7 +115,6 @@ func Check404(url string) (int, int64, error) {
 }
 
 // handles requests. moved some stuff out for speed
-// removed useless single extension support
 func DoRequest(page string) interface{} {
 	// todo: multiple extensions
 	// base url + word
@@ -177,9 +153,6 @@ func DoRequest(page string) interface{} {
 		req.Header.Set("X-Originating-IP", "127.0.0.1")
 	}
 
-	// needed to avoid overloading file descriptors
-	//req.Close = true
-
 	resp, err := client.Do(req)
 	if err != nil {
 		atomic.AddUint64(&errors, 1)
@@ -192,8 +165,8 @@ func DoRequest(page string) interface{} {
 
 	// useful comment
 	if (resp.StatusCode == http.StatusOK && *only200) ||
-		(!skip_codes[resp.StatusCode] && !*only200) ||
-		(*wildcard) {
+		(!skip_codes[resp.StatusCode] && !*only200) {
+
 		// try content-length first
 		size, _ = strconv.ParseInt(resp.Header.Get("content-length"), 10, 64)
 
@@ -267,7 +240,6 @@ func main() {
 			y, _ := strconv.Atoi(x)
 			skip_codes[y] = true
 		}
-		fmt.Fprintf(os.Stderr, "Excluding code: %s\n", *skip_code)
 	}
 
 	// exclude sizes
@@ -276,7 +248,6 @@ func main() {
 			y, _ := strconv.ParseInt(x, 10, 64)
 			skip_sizes[y] = true
 		}
-		fmt.Fprintf(os.Stderr, "Excluding size: %s\n", *skip_size)
 	}
 
 	// set redirects policy
@@ -292,23 +263,35 @@ func main() {
 		os.Exit(0)
 	}
 
-	// check for wildcard responses, and return if true
-	if *wildcard == true {
-		if IsWildcard(*base) == true {
-			r.Fprintf(os.Stderr, "\nWildcard detected on %s, skipping...\n", *base)
+	// calibrate the 404 detection engine, let's do it a few times
+	for z := 0; z < 5; z++ {
+		x, y, err := Check404(*base)
+		if err != nil {
+			r.Fprintln(os.Stderr, "\nHost died while checking 'not found' pages\n")
 			os.Exit(0)
 		}
+
+		if !skip_codes[x] && !skip_sizes[y] {
+			skip_codes[x] = true
+
+			skip_sizes[y] = true
+		}
+
+		time.Sleep(500 * time.Millisecond)
 	}
 
-	// calibrate the 404 detection engine
-	x, y, err := Check404(*base)
-	if err == nil {
-		fmt.Fprintf(os.Stderr, "Heuristic skip: %d/%d bytes\n\n", x, y)
-		if x != http.StatusNotFound {
-			skip_codes[x] = true
-		}
-		skip_sizes[y] = true
+	// summary
+	var keys []string
+	for key, _ := range skip_codes {
+		keys = append(keys, strconv.Itoa(key))
 	}
+	fmt.Fprintf(os.Stderr, "Skipping codes: %s\n", strings.Join(keys, ","))
+
+	keys = nil
+	for key, _ := range skip_sizes {
+		keys = append(keys, strconv.FormatInt(key, 10))
+	}
+	fmt.Fprintf(os.Stderr, "Skipping sizes: %s\n", strings.Join(keys, ","))
 
 	// start
 	m = brutemachine.New(*threads, *wordlist, DoRequest, OnResult)
@@ -326,7 +309,7 @@ func main() {
 
 // Do some initialization.
 // NOTE: We can't call this in the 'init' function otherwise
-// *are gonna be mandatory for unit test modules.
+// are gonna be mandatory for unit test modules.
 func setup() {
 	flag.Parse()
 
