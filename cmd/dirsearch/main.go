@@ -284,13 +284,13 @@ func main() {
 	for key, _ := range skip_codes {
 		keys = append(keys, strconv.Itoa(key))
 	}
-	fmt.Fprintf(os.Stderr, "Skipping codes: %s\n", strings.Join(keys, ","))
+	fmt.Fprintf(os.Stderr, "\nSkipping codes: %s\n", strings.Join(keys, ","))
 
 	keys = nil
 	for key, _ := range skip_sizes {
 		keys = append(keys, strconv.FormatInt(key, 10))
 	}
-	fmt.Fprintf(os.Stderr, "Skipping sizes: %s\n", strings.Join(keys, ","))
+	fmt.Fprintf(os.Stderr, "Skipping sizes: %s\n\n", strings.Join(keys, ","))
 
 	// start
 	m = brutemachine.New(*threads, *wordlist, DoRequest, OnResult)
