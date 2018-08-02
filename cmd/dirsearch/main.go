@@ -12,8 +12,7 @@ import (
 	"github.com/eur0pa/dirsearch-go"
 	"github.com/evilsocket/brutemachine"
 	"github.com/fatih/color"
-	"github.com/satori/go.uuid"
-	"io"
+	"github.com/gofrs/uuid"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -80,41 +79,43 @@ var (
 // check if host is alive before going all the trouble
 func IsAlive(url string) bool {
 	res, err := client.Get(*base)
-
 	if err != nil {
+		r.Fprintf(os.Stderr, "Could not connect to %s: %v\n", *base, err)
 		return false
 	}
 
 	defer res.Body.Close()
-	_, _ = io.Copy(ioutil.Discard, res.Body)
 
 	return true
 }
 
 // make a bogus request to calibrate the 404 engine
 func Check404(url string) (int, int64, error) {
-	test := uuid.Must(uuid.NewV4(), nil).String()
+	test := uuid.Must(uuid.NewV4()).String()
+
 	res, err := client.Get(*base + test)
-
-	if err == nil {
-		defer res.Body.Close()
-
-		size, _ := strconv.ParseInt(res.Header.Get("content-length"), 10, 64)
-
-		if size <= 0 {
-			content, err := ioutil.ReadAll(res.Body)
-			if err == nil {
-				size = int64(len(content))
-			}
-		}
-
-		return res.StatusCode, size, nil
+	if err != nil {
+		return 0, 0, err
 	}
 
-	return 0, 0, err
+	defer res.Body.Close()
+
+	size, _ := strconv.ParseInt(res.Header.Get("content-length"), 10, 64)
+
+	if size <= 0 {
+		content, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			return 0, 0, err
+		}
+		size = int64(len(content))
+	}
+
+	return res.StatusCode, size, nil
 }
 
 // handles requests. moved some stuff out for speed
+// reduced error output for practical reasons
+// removed body consuming as it's apparently useless in go ≥ 1.4
 func DoRequest(page string) interface{} {
 	// todo: multiple extensions
 	// base url + word
@@ -136,6 +137,8 @@ func DoRequest(page string) interface{} {
 		return nil
 	}
 
+	// some servers have issues with */*, some others will serve
+	// different content
 	req.Header.Set("User-Agent", dirsearch.GetRandomUserAgent())
 	req.Header.Set("Accept", "*/*")
 
@@ -159,14 +162,13 @@ func DoRequest(page string) interface{} {
 		return Result{url, 0, 0, "", err}
 	}
 
+	// https://gist.github.com/mholt/eba0f2cc96658be0f717
 	defer resp.Body.Close()
 
 	size := int64(0)
 
 	// useful comment
-	if (resp.StatusCode == http.StatusOK && *only200) ||
-		(!skip_codes[resp.StatusCode] && !*only200) {
-
+	if (resp.StatusCode == http.StatusOK && *only200) || (!skip_codes[resp.StatusCode] && !*only200) {
 		// try content-length first
 		size, _ = strconv.ParseInt(resp.Header.Get("content-length"), 10, 64)
 
@@ -176,8 +178,6 @@ func DoRequest(page string) interface{} {
 			if err == nil {
 				size = int64(len(content))
 			}
-		} else {
-			_, _ = io.Copy(ioutil.Discard, resp.Body)
 		}
 
 		// skip if size is as requested, or included in a given range
@@ -189,10 +189,11 @@ func DoRequest(page string) interface{} {
 			return nil
 		}
 
+		// todo: compute string similarity or levenshtein distance between
+		//       this and the last response and skip it if too similar
+		//		 (see: yahoo / oath wildcard responses)
 		return Result{url, resp.StatusCode, size, resp.Header.Get("location"), nil}
 	}
-
-	_, _ = io.Copy(ioutil.Discard, resp.Body)
 
 	return nil
 }
@@ -201,7 +202,7 @@ func OnResult(res interface{}) {
 	result, ok := res.(Result)
 
 	if !ok {
-		r.Fprintln(os.Stderr, "Error while converting result.")
+		r.Fprintf(os.Stderr, "Error while converting result.")
 		return
 	}
 
@@ -258,8 +259,7 @@ func main() {
 	}
 
 	// check if alive or fuck off
-	if IsAlive(*base) == false {
-		r.Fprintf(os.Stderr, "\n%s is down, exiting...\n", *base)
+	if !IsAlive(*base) {
 		os.Exit(0)
 	}
 
@@ -267,20 +267,19 @@ func main() {
 	for z := 0; z < 5; z++ {
 		x, y, err := Check404(*base)
 		if err != nil {
-			r.Fprintln(os.Stderr, "\nHost died while checking 'not found' pages\n")
 			os.Exit(0)
 		}
 
+		// add found codes and sizes to the skip list
 		if !skip_codes[x] && !skip_sizes[y] {
 			skip_codes[x] = true
-
 			skip_sizes[y] = true
 		}
 
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// summary
+	// print a short summary
 	var keys []string
 	for key, _ := range skip_codes {
 		keys = append(keys, strconv.Itoa(key))
