@@ -13,6 +13,7 @@ import (
 	"github.com/evilsocket/brutemachine"
 	"github.com/fatih/color"
 	"github.com/gofrs/uuid"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -46,6 +47,8 @@ var (
 	skip_sizes = make(map[int64]bool)
 
 	tr = &http.Transport{
+		MaxIdleConns:        *threads,
+		MaxIdleConnsPerHost: *threads,
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: true,
 		},
@@ -86,6 +89,8 @@ func IsAlive(url string) bool {
 
 	defer res.Body.Close()
 
+	io.Copy(ioutil.Discard, res.Body)
+
 	return true
 }
 
@@ -108,6 +113,8 @@ func Check404(url string) (int, int64, error) {
 			return 0, 0, err
 		}
 		size = int64(len(content))
+	} else {
+		io.Copy(ioutil.Discard, res.Body)
 	}
 
 	return res.StatusCode, size, nil
@@ -115,7 +122,6 @@ func Check404(url string) (int, int64, error) {
 
 // handles requests. moved some stuff out for speed
 // reduced error output for practical reasons
-// removed body consuming as it's apparently useless in go ≥ 1.4
 func DoRequest(page string) interface{} {
 	// todo: multiple extensions
 	// base url + word
@@ -141,6 +147,7 @@ func DoRequest(page string) interface{} {
 	// different content
 	req.Header.Set("User-Agent", dirsearch.GetRandomUserAgent())
 	req.Header.Set("Accept", "*/*")
+	//req.Close = true
 
 	// add cookies
 	if *cookie != "" {
@@ -178,6 +185,8 @@ func DoRequest(page string) interface{} {
 			if err == nil {
 				size = int64(len(content))
 			}
+		} else {
+			io.Copy(ioutil.Discard, resp.Body)
 		}
 
 		// skip if size is as requested, or included in a given range
@@ -194,6 +203,8 @@ func DoRequest(page string) interface{} {
 		//		 (see: yahoo / oath wildcard responses)
 		return Result{url, resp.StatusCode, size, resp.Header.Get("location"), nil}
 	}
+
+	io.Copy(ioutil.Discard, resp.Body)
 
 	return nil
 }
@@ -264,19 +275,15 @@ func main() {
 	}
 
 	// calibrate the 404 detection engine, let's do it a few times
-	for z := 0; z < 5; z++ {
-		x, y, err := Check404(*base)
-		if err != nil {
-			os.Exit(0)
-		}
+	x, y, err := Check404(*base)
+	if err != nil {
+		os.Exit(0)
+	}
 
-		// add found codes and sizes to the skip list
-		if !skip_codes[x] && !skip_sizes[y] {
-			skip_codes[x] = true
-			skip_sizes[y] = true
-		}
-
-		time.Sleep(500 * time.Millisecond)
+	// add found codes and sizes to the skip list
+	if !skip_codes[x] && !skip_sizes[y] {
+		skip_codes[x] = true
+		skip_sizes[y] = true
 	}
 
 	// print a short summary
