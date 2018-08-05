@@ -10,7 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/eur0pa/dirsearch-go"
-	"github.com/evilsocket/brutemachine"
+	"github.com/eur0pa/dirsearch-go/brutemachine"
 	"github.com/fatih/color"
 	"github.com/gofrs/uuid"
 	"io"
@@ -43,6 +43,7 @@ var (
 	b = color.New(color.FgBlue)
 
 	errors     = uint64(0)
+	extensions []string
 	skip_codes = make(map[int]bool)
 	skip_sizes = make(map[int64]bool)
 
@@ -62,7 +63,7 @@ var (
 	base      = flag.String("u", "", "URL to enumerate")
 	wordlist  = flag.String("w", "dict.txt", "Wordlist file")
 	method    = flag.String("M", "GET", "Request method (HEAD / GET)")
-	ext       = flag.String("e", "", "Extension to add to requests (dirsearch style)")
+	ext       = flag.String("e", "", "Extension to add to requests (comma sep)")
 	cookie    = flag.String("c", "", "Cookies (format: name=value;name=value)")
 	skip_code = flag.String("x", "", "Status codes to exclude (comma sep)")
 	skip_size = flag.String("s", "", "Skip sizes (comma sep)")
@@ -122,19 +123,18 @@ func Check404(url string) (int, int64, error) {
 
 // handles requests. moved some stuff out for speed
 // reduced error output for practical reasons
-func DoRequest(page string) interface{} {
-	// todo: multiple extensions
+func DoRequest(page string, ext string) interface{} {
 	// base url + word
-	url := fmt.Sprintf("%s%s", *base, page)
+	url := *base + page
 
 	// add .ext to every request, or
-	if *ext != "" && *ext_all {
-		url = fmt.Sprintf("%s.%s", url, *ext)
+	if ext != "" && *ext_all {
+		url = url + "." + ext
 	}
 
 	// replace .ext where needed
-	if *ext != "" && !*ext_all {
-		url = strings.Replace(url, "%EXT%", *ext, -1)
+	if ext != "" && !*ext_all {
+		url = strings.Replace(url, "%EXT%", ext, -1)
 	}
 
 	// build request
@@ -198,9 +198,6 @@ func DoRequest(page string) interface{} {
 			return nil
 		}
 
-		// todo: compute string similarity or levenshtein distance between
-		//       this and the last response and skip it if too similar
-		//		 (see: yahoo / oath wildcard responses)
 		return Result{url, resp.StatusCode, size, resp.Header.Get("location"), nil}
 	}
 
@@ -245,6 +242,14 @@ func OnResult(res interface{}) {
 
 func main() {
 	setup()
+
+	// create a list of extensions
+	extensions = append(extensions, "")
+	if *ext != "" {
+		for _, x := range strings.Split(*ext, ",") {
+			extensions = append(extensions, x)
+		}
+	}
 
 	// create a list of exclusions
 	if *skip_code != "" {
@@ -300,7 +305,7 @@ func main() {
 	fmt.Fprintf(os.Stderr, "Skipping sizes: %s\n\n", strings.Join(keys, ","))
 
 	// start
-	m = brutemachine.New(*threads, *wordlist, DoRequest, OnResult)
+	m = brutemachine.New(*threads, *wordlist, extensions, DoRequest, OnResult)
 
 	if err := m.Start(); err != nil {
 		panic(err)

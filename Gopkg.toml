@@ -26,16 +26,12 @@
 
 
 [[constraint]]
-  branch = "master"
-  name = "github.com/evilsocket/brutemachine"
-
-[[constraint]]
   name = "github.com/fatih/color"
   version = "1.7.0"
 
 [[constraint]]
   name = "github.com/gofrs/uuid"
-  version = "2.1.0"
+  version = "3.0.0"
 
 [prune]
   go-tests = true
