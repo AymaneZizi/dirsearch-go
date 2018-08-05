@@ -78,21 +78,16 @@ func isAlive(url string) bool {
 
 func contentLenght(res *http.Response) (int64, error) {
 	cl := res.Header.Get("Content-Length")
-	if cl != "" {
-		size, err := strconv.ParseInt(cl, 10, 64)
+	size, err := strconv.ParseInt(cl, 10, 64)
+	if cl == "" || err != nil || size <= 0 {
+		b, err := ioutil.ReadAll(res.Body)
 		if err != nil {
-			return 0, fmt.Errorf("could not parse Content-Length header value")
+			return 0, err
 		}
-		return size, nil
+
+		size = int64(len(b))
 	}
 
-	// if not Content-Length header was found, read the entire body.
-	b, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		return 0, err
-	}
-
-	size := int64(len(b))
 	return size, nil
 }
 
