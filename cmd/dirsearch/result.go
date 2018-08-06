@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"net/http"
 	"os"
 )
@@ -16,24 +15,24 @@ type Result struct {
 }
 
 // Print prints useful information of a result.
-func (r Result) Print() {
+func (res Result) Print() {
 	switch {
-	case r.status == http.StatusNotFound:
+	case res.status == http.StatusNotFound:
 		return
 
-	case r.err != nil:
-		fmt.Fprintf(os.Stderr, "%s%s : %v%s\n", FgRed, r.url, r.err, Reset)
+	case res.err != nil:
+		r.Fprintf(os.Stderr, "%s : %v\n", res.url, res.err)
 
-	case r.status >= 200 && r.status < 300:
-		fmt.Printf("%s%-3d %-9d %s%s\n", FgGreen, r.status, r.size, r.url, Reset)
+	case res.status >= 200 && res.status < 300:
+		g.Printf("%-3d %-9d %s\n", res.status, res.size, res.url)
 
-	case r.status >= 300 && r.status < 400:
-		fmt.Printf("%s%-3d %-9d %s -> %s%s\n", FgBlue, r.status, r.size, r.url, r.location, Reset)
+	case res.status >= 300 && res.status < 400:
+		b.Printf("%-3d %-9d %s -> %s\n", res.status, res.size, res.url, res.location)
 
-	case r.status >= 400 && r.status < 500:
-		fmt.Printf("%s%-3d %-9d %s%s\n", FgYellow, r.status, r.size, r.url, Reset)
+	case res.status >= 400 && res.status < 500:
+		y.Printf("%-3d %-9d %s\n", res.status, res.size, res.url)
 
-	case r.status >= 500 && r.status < 600:
-		fmt.Printf("%s%-3d %-9d %s%s\n", FgRed, r.status, r.size, r.url, Reset)
+	case res.status >= 500 && res.status < 600:
+		r.Printf("%-3d %-9d %s\n", res.status, res.size, res.url)
 	}
 }

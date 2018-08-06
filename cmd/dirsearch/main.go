@@ -23,6 +23,7 @@ import (
 
 	"github.com/eur0pa/dirsearch-go"
 	"github.com/eur0pa/dirsearch-go/brutemachine"
+	"github.com/fatih/color"
 )
 
 var (
@@ -57,6 +58,11 @@ var (
 		Timeout: time.Duration(*timeout) * time.Second,
 	}
 
+	g = color.New(color.FgGreen)
+	y = color.New(color.FgYellow)
+	r = color.New(color.FgRed)
+	b = color.New(color.FgBlue)
+
 	m          *brutemachine.Machine
 	normalized string
 	extensions []string
@@ -69,7 +75,7 @@ var (
 func isAlive(url string) bool {
 	res, err := client.Get(*base)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%scould not connect to %s: %v%s\n", FgRed, *base, err, Reset)
+		r.Fprintf(os.Stderr, "could not connect to %s: %v\n", *base, err)
 		return false
 	}
 
@@ -138,7 +144,7 @@ func do(page, ext string) brutemachine.Printer {
 		atomic.AddUint64(&errors, 1)
 		return &Result{
 			url: url,
-			err: fmt.Errorf("%scould not create request: %v%s", FgRed, err, Reset),
+			err: fmt.Errorf("could not create request: %v", err),
 		}
 	}
 
@@ -167,7 +173,7 @@ func do(page, ext string) brutemachine.Printer {
 		atomic.AddUint64(&errors, 1)
 		return &Result{
 			url: req.RequestURI,
-			err: fmt.Errorf("%scould not request %s: %v%s", FgRed, req.RequestURI, err, Reset),
+			err: fmt.Errorf("could not request %s: %v", req.RequestURI, err),
 		}
 	}
 
@@ -212,7 +218,7 @@ func do(page, ext string) brutemachine.Printer {
 // onResult handles each result.
 var onResult = func(res brutemachine.Printer) {
 	if errors > *maxerrors {
-		fmt.Fprintf(os.Stderr, "\n%sExceeded %d errors, quitting...%s\n", FgRed, *maxerrors, Reset)
+		r.Fprintf(os.Stderr, "\nExceeded %d errors, quitting...\n", *maxerrors)
 		os.Exit(1)
 	}
 	res.Print()
@@ -247,7 +253,7 @@ func main() {
 		for _, x := range strings.Split(*skipCode, ",") {
 			y, err := strconv.Atoi(x)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "%scould not parse code '%v'%s\n", FgRed, x, Reset)
+				r.Fprintf(os.Stderr, "could not parse code '%v'\n", x)
 				continue
 			}
 			skipCodes[y] = struct{}{}
@@ -259,7 +265,7 @@ func main() {
 		for _, x := range strings.Split(*skipSize, ",") {
 			y, err := strconv.ParseInt(x, 10, 64)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "%scould not parse size '%v'%s\n", FgRed, x, Reset)
+				r.Fprintf(os.Stderr, "could not parse size '%v'\n", x)
 				continue
 			}
 			skipSizes[y] = struct{}{}
@@ -293,11 +299,11 @@ func main() {
 
 	m = brutemachine.New(*threads, *wordlist, extensions, *delay, do, onResult)
 	if err := m.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "%scould not start bruteforce: %v%s\n", FgRed, err, Reset)
+		r.Fprintf(os.Stderr, "could not start bruteforce: %v\n", err)
 	}
 	m.Wait()
 
-	fmt.Fprintf(os.Stderr, "\n%sDONE%s\n", FgGreen, Reset)
+	g.Fprintf(os.Stderr, "\nDONE\n")
 	printStats()
 }
 
@@ -323,7 +329,7 @@ func setup() {
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-signals
-		fmt.Fprintf(os.Stderr, "\n%sINTERRUPTING...%s\n", FgRed, Reset)
+		r.Fprintf(os.Stderr, "\nINTERRUPTING...\n")
 		printStats()
 		os.Exit(0)
 	}()
