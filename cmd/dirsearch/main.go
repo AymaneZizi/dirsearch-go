@@ -44,8 +44,8 @@ var (
 
 	only200 = flag.Bool("2", false, "Only display responses with 200 status code")
 	follow  = flag.Bool("f", false, "Follow redirects")
-	extAll  = flag.Bool("ef", false, "Add extension to all requests (dirbuster style)")
-	waf     = flag.Bool("waf", false, "Inject 'WAF bypass' headers")
+	//extAll  = flag.Bool("ef", false, "Add extension to all requests (dirbuster style)")
+	waf = flag.Bool("waf", false, "Inject 'WAF bypass' headers")
 
 	client = &http.Client{
 		Transport: &http.Transport{
@@ -129,19 +129,19 @@ func do(page, ext string) brutemachine.Printer {
 	url := *base + page
 
 	// add .ext to every request, or replace where needed
+	// 06/08: %EXT% removed for the time being, bug a rotta de collo
 	if ext != "" {
-		if *extAll {
-			url = url + "." + ext
-		} else {
-			url = strings.Replace(url, "%EXT%", ext, -1)
-		}
+		url = url + "." + ext
 	}
 
 	// build request
 	req, err := http.NewRequest(*method, url, nil)
 	if err != nil {
-		// handle %EXT% urls
-		return nil
+		atomic.AddUint64(&errors, 1)
+		return &Result{
+			url: url,
+			err: fmt.Errorf("could not create request: %v", err),
+		}
 	}
 
 	// some servers have issues with */*, some others will serve
@@ -232,7 +232,7 @@ func summary() {
 		sizes = append(sizes, key)
 	}
 
-	fmt.Fprintf(os.Stderr, "\nSkip codes: %v\nSkip sizes: %v\nExtensions: %v\n     Delay: [%d ms]\n\n", codes, sizes, extensions, *delay)
+	fmt.Fprintf(os.Stderr, "\nSkip codes: %v\nSkip sizes: %v\nExtensions: %v\n   Workers: [%d / %d ms]\n\n", codes, sizes, extensions, *threads, *delay)
 }
 
 func main() {
