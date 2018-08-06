@@ -78,6 +78,7 @@ func (m *Machine) inputConsumer() {
 				m.output <- res
 			}
 
+			// add a delay to teh request if needed
 			if m.delay > 0 {
 				time.Sleep(time.Duration(m.delay) * time.Millisecond)
 			}
