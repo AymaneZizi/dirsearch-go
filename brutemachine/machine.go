@@ -28,6 +28,8 @@ type Machine struct {
 	wordlist string
 	// Extensions
 	extensions []string
+	// Delay for requests
+	delay int64
 	// Positive results channel.
 	output chan Printer
 	// Inputs channel.
@@ -43,7 +45,7 @@ type Machine struct {
 // New builds a new machine object.
 //
 // If consumers is less or equal than 0, CPU*2 will be used as default value.
-func New(consumers int, wordlist string, extensions []string, runHandler RunHandler, resHandler ResHandler) *Machine {
+func New(consumers int, wordlist string, extensions []string, delay int64, runHandler RunHandler, resHandler ResHandler) *Machine {
 	var workers uint
 	if consumers <= 0 {
 		workers = uint(runtime.NumCPU() * 2)
@@ -56,6 +58,7 @@ func New(consumers int, wordlist string, extensions []string, runHandler RunHand
 		consumers:  workers,
 		wordlist:   wordlist,
 		extensions: extensions,
+		delay:      delay,
 		output:     make(chan Printer),
 		input:      make(chan string),
 		wait:       sync.WaitGroup{},
@@ -74,6 +77,11 @@ func (m *Machine) inputConsumer() {
 				atomic.AddUint64(&m.Stats.Results, 1)
 				m.output <- res
 			}
+
+			if m.delay > 0 {
+				time.Sleep(time.Duration(m.delay) * time.Millisecond)
+			}
+
 			m.wait.Done()
 		}
 	}

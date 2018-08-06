@@ -1,7 +1,7 @@
 // This software is a Go implementation of dirsearch by Mauro Soria
 // (maurosoria at gmail dot com) written by Simone Margaritelli
 // (evilsocket at gmail dot com).
-// further development by @eur0pa
+// further development by @eur0pa and @jimen0
 
 package main
 
@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -22,7 +23,6 @@ import (
 
 	"github.com/eur0pa/dirsearch-go"
 	"github.com/eur0pa/dirsearch-go/brutemachine"
-	"github.com/gofrs/uuid"
 )
 
 var (
@@ -35,6 +35,7 @@ var (
 	skipSize = flag.String("s", "", "Skip sizes (comma sep)")
 
 	maxerrors = flag.Uint64("E", 10, "Max. errors before exiting")
+	delay     = flag.Int64("d", 0, "Delay between requests (milliseconds)")
 	sizeMin   = flag.Int64("sm", -1, "Skip size (min value)")
 	sizeMax   = flag.Int64("sM", -1, "Skip size (max value)")
 	threads   = flag.Int("t", 10, "Number of concurrent goroutines")
@@ -56,10 +57,10 @@ var (
 		Timeout: time.Duration(*timeout) * time.Second,
 	}
 
-	normalized string
 	m          *brutemachine.Machine
-	errors     = uint64(0)
+	normalized string
 	extensions []string
+	errors     = uint64(0)
 	skipCodes  = make(map[int]struct{})
 	skipSizes  = make(map[int64]struct{})
 )
@@ -68,24 +69,32 @@ var (
 func isAlive(url string) bool {
 	res, err := client.Get(*base)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "could not connect to %s: %v\n", *base, err)
+		fmt.Fprintf(os.Stderr, "%scould not connect to %s: %v%s\n", FgRed, *base, err, Reset)
 		return false
 	}
+
 	defer res.Body.Close()
+
+	// no :(
+	io.Copy(ioutil.Discard, res.Body)
 
 	return true
 }
 
+// returns the content-length or the size of the body
+// note: content-length can lie
 func contentLenght(res *http.Response) (int64, error) {
 	cl := res.Header.Get("Content-Length")
 	size, err := strconv.ParseInt(cl, 10, 64)
-	if cl == "" || err != nil || size <= 0 {
+	if size <= 0 || err != nil {
 		b, err := ioutil.ReadAll(res.Body)
 		if err != nil {
 			return 0, err
 		}
-
 		size = int64(len(b))
+	} else {
+		// no :( don't touch this
+		io.Copy(ioutil.Discard, res.Body)
 	}
 
 	return size, nil
@@ -93,12 +102,11 @@ func contentLenght(res *http.Response) (int64, error) {
 
 // check404 makes a bogus request to calibrate the 404 engine
 func check404(url string) (int, int64, error) {
-	test := uuid.Must(uuid.NewV4()).String()
-
-	res, err := client.Get(*base + test)
+	res, err := client.Get(*base + "s0m3th1ng-r4nd0m-w1th0ut-p4ck4g3s")
 	if err != nil {
 		return 0, 0, err
 	}
+
 	defer res.Body.Close()
 
 	size, err := contentLenght(res)
@@ -128,7 +136,10 @@ func do(page, ext string) brutemachine.Printer {
 	req, err := http.NewRequest(*method, url, nil)
 	if err != nil {
 		atomic.AddUint64(&errors, 1)
-		return &Result{url: url, err: fmt.Errorf("could not create request: %v", err)}
+		return &Result{
+			url: url,
+			err: fmt.Errorf("%scould not create request: %v%s", FgRed, err, Reset),
+		}
 	}
 
 	// some servers have issues with */*, some others will serve
@@ -154,13 +165,18 @@ func do(page, ext string) brutemachine.Printer {
 	res, err := client.Do(req)
 	if err != nil {
 		atomic.AddUint64(&errors, 1)
-		return &Result{url: req.RequestURI, err: fmt.Errorf("could not request %s: %v", req.RequestURI, err)}
+		return &Result{
+			url: req.RequestURI,
+			err: fmt.Errorf("%scould not request %s: %v%s", FgRed, req.RequestURI, err, Reset),
+		}
 	}
-	// https://gist.github.com/mholt/eba0f2cc96658be0f717
+
 	defer res.Body.Close()
 
-	_, ok := skipCodes[res.StatusCode]
-	if (res.StatusCode == http.StatusOK && *only200) || (!ok && !*only200) {
+	_, skip := skipCodes[res.StatusCode]
+
+	// skip certain status codes (auto-skip, and user defined)
+	if (res.StatusCode == http.StatusOK && *only200) || (!skip && !*only200) {
 		location := res.Header.Get("Location")
 
 		size, err := contentLenght(res)
@@ -168,12 +184,13 @@ func do(page, ext string) brutemachine.Printer {
 			return &Result{url, res.StatusCode, 0, location, err}
 		}
 
-		// skip if size is as requested, or included in a given range
-		_, ok := skipSizes[size]
-		if !ok {
+		// skip certain sizes (auto-skip, and user defined)
+		_, skip := skipSizes[size]
+		if skip {
 			return nil
 		}
 
+		// skip a range of sizes
 		if size >= *sizeMin && size <= *sizeMax {
 			return nil
 		}
@@ -186,13 +203,16 @@ func do(page, ext string) brutemachine.Printer {
 		}
 	}
 
+	// bad jimeno :(
+	io.Copy(ioutil.Discard, res.Body)
+
 	return nil
 }
 
 // onResult handles each result.
 var onResult = func(res brutemachine.Printer) {
 	if errors > *maxerrors {
-		fmt.Fprintf(os.Stderr, "\nExceeded %d errors, quitting...", *maxerrors)
+		fmt.Fprintf(os.Stderr, "\n%sExceeded %d errors, quitting...%s\n", FgRed, *maxerrors, Reset)
 		os.Exit(1)
 	}
 	res.Print()
@@ -210,9 +230,7 @@ func summary() {
 		sizes = append(sizes, key)
 	}
 
-	fmt.Fprintf(os.Stderr, "Skipping codes: %v\n", codes)
-	fmt.Fprintf(os.Stderr, "Skipping sizes: %v\n", sizes)
-	fmt.Fprintf(os.Stderr, "Extensions: %v\n", extensions)
+	fmt.Fprintf(os.Stderr, "\nSkip codes: %v\nSkip sizes: %v\nExtensions: %v\n     Delay: %d ms\n\n", codes, sizes, extensions, *delay)
 }
 
 func main() {
@@ -229,7 +247,7 @@ func main() {
 		for _, x := range strings.Split(*skipCode, ",") {
 			y, err := strconv.Atoi(x)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "could not parse code '%v'\n", x)
+				fmt.Fprintf(os.Stderr, "%scould not parse code '%v'%s\n", FgRed, x, Reset)
 				continue
 			}
 			skipCodes[y] = struct{}{}
@@ -241,7 +259,7 @@ func main() {
 		for _, x := range strings.Split(*skipSize, ",") {
 			y, err := strconv.ParseInt(x, 10, 64)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "could not parse size '%v'\n", x)
+				fmt.Fprintf(os.Stderr, "%scould not parse size '%v'%s\n", FgRed, x, Reset)
 				continue
 			}
 			skipSizes[y] = struct{}{}
@@ -273,13 +291,13 @@ func main() {
 	// print a short summary.
 	summary()
 
-	m = brutemachine.New(*threads, *wordlist, extensions, do, onResult)
+	m = brutemachine.New(*threads, *wordlist, extensions, *delay, do, onResult)
 	if err := m.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "could not start bruteforce: %v\n", err)
+		fmt.Fprintf(os.Stderr, "%scould not start bruteforce: %v%s\n", FgRed, err, Reset)
 	}
 	m.Wait()
 
-	fmt.Fprintf(os.Stderr, "\nDONE\n")
+	fmt.Fprintf(os.Stderr, "\n%sDONE%s\n", FgGreen, Reset)
 	printStats()
 }
 
@@ -290,7 +308,7 @@ func setup() {
 	flag.Parse()
 
 	var err error
-	normalized, err = dirsearch.NormalizeURL(*base)
+	*base, err = dirsearch.NormalizeURL(*base)
 	if err != nil {
 		fmt.Println(err)
 		flag.Usage()
@@ -305,7 +323,7 @@ func setup() {
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-signals
-		fmt.Fprintf(os.Stderr, "\nINTERRUPTING...\n")
+		fmt.Fprintf(os.Stderr, "\n%sINTERRUPTING...%s\n", FgRed, Reset)
 		printStats()
 		os.Exit(0)
 	}()
