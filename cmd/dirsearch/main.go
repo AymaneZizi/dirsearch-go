@@ -128,24 +128,20 @@ func do(page, ext string) brutemachine.Printer {
 	// base url + word
 	url := *base + page
 
-	// add .ext to every request, or
-	if ext != "" && *extAll {
-		url = url + "." + ext
-	}
-
-	// replace .ext where needed
-	if ext != "" && !*extAll {
-		url = strings.Replace(url, "%EXT%", ext, -1)
+	// add .ext to every request, or replace where needed
+	if ext != "" {
+		if *extAll {
+			url = url + "." + ext
+		} else {
+			url = strings.Replace(url, "%EXT%", ext, -1)
+		}
 	}
 
 	// build request
 	req, err := http.NewRequest(*method, url, nil)
 	if err != nil {
-		atomic.AddUint64(&errors, 1)
-		return &Result{
-			url: url,
-			err: fmt.Errorf("could not create request: %v", err),
-		}
+		// handle %EXT% urls
+		return nil
 	}
 
 	// some servers have issues with */*, some others will serve
@@ -236,14 +232,13 @@ func summary() {
 		sizes = append(sizes, key)
 	}
 
-	fmt.Fprintf(os.Stderr, "\nSkip codes: %v\nSkip sizes: %v\nExtensions: %v\n     Delay: %d ms\n\n", codes, sizes, extensions, *delay)
+	fmt.Fprintf(os.Stderr, "\nSkip codes: %v\nSkip sizes: %v\nExtensions: %v\n     Delay: [%d ms]\n\n", codes, sizes, extensions, *delay)
 }
 
 func main() {
 	setup()
 
 	// create a list of extensions
-	extensions = append(extensions, "")
 	if *ext != "" {
 		extensions = append(extensions, strings.Split(*ext, ",")...)
 	}
@@ -297,6 +292,9 @@ func main() {
 	// print a short summary.
 	summary()
 
+	// add this last so it won't print
+	extensions = append(extensions, "")
+
 	m = brutemachine.New(*threads, *wordlist, extensions, *delay, do, onResult)
 	if err := m.Start(); err != nil {
 		r.Fprintf(os.Stderr, "could not start bruteforce: %v\n", err)
@@ -304,6 +302,7 @@ func main() {
 	m.Wait()
 
 	g.Fprintf(os.Stderr, "\nDONE\n")
+
 	printStats()
 }
 
