@@ -2,16 +2,16 @@ package brutemachine
 
 import (
 	"bufio"
+	"fmt"
+	"io"
 	"os"
 )
 
-// LineReader will accept the name of a file and offset as argument
-// and will return a channel from which lines can be read
-// one at a time.
-func LineReader(filename string, noff int64) (chan string, error) {
-	fp, err := os.Open(filename)
+// LineReader returns wordlist lines.
+func LineReader(wordlist string, noff int64) (chan string, error) {
+	f, err := os.Open(wordlist)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not open file %s: %v", wordlist, err)
 	}
 
 	// if offset defined then start from there
@@ -20,22 +20,31 @@ func LineReader(filename string, noff int64) (chan string, error) {
 		b := make([]byte, 1)
 		for b[0] != '\n' {
 			noff--
-			fp.Seek(noff, os.SEEK_SET)
-			fp.Read(b)
+			_, err := f.Seek(noff, io.SeekStart)
+			if err != nil {
+				return nil, fmt.Errorf("could not seek: %v", err)
+			}
+			_, err = f.Read(b)
+			if err != nil {
+				return nil, fmt.Errorf("could not read: %v", err)
+			}
 		}
 		noff++
 	}
 
 	out := make(chan string)
 	go func() {
-		defer fp.Close()
-		// we need to close the out channel in order
-		// to signal the end-of-data condition
+		defer f.Close()
 		defer close(out)
-		scanner := bufio.NewScanner(fp)
+
+		scanner := bufio.NewScanner(f)
 		scanner.Split(bufio.ScanLines)
 		for scanner.Scan() {
-			noff, _ = fp.Seek(0, os.SEEK_CUR)
+			var err error
+			noff, err = f.Seek(0, io.SeekCurrent)
+			if err != nil {
+				return
+			}
 			out <- scanner.Text()
 		}
 	}()

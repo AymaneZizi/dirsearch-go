@@ -9,11 +9,6 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"github.com/eur0pa/dirsearch-go"
-	"github.com/eur0pa/dirsearch-go/brutemachine"
-	"github.com/fatih/color"
-	"github.com/gofrs/uuid"
-	"io"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -24,123 +19,116 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/eur0pa/dirsearch-go"
+	"github.com/eur0pa/dirsearch-go/brutemachine"
+	"github.com/gofrs/uuid"
 )
 
-type Result struct {
-	url      string
-	status   int
-	size     int64
-	location string
-	err      error
-}
-
 var (
-	m *brutemachine.Machine
-
-	g = color.New(color.FgGreen)
-	y = color.New(color.FgYellow)
-	r = color.New(color.FgRed)
-	b = color.New(color.FgBlue)
-
-	errors     = uint64(0)
-	extensions []string
-	skip_codes = make(map[int]bool)
-	skip_sizes = make(map[int64]bool)
-
-	tr = &http.Transport{
-		MaxIdleConns:        *threads,
-		MaxIdleConnsPerHost: *threads,
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
-	}
-
-	client = &http.Client{
-		Transport: tr,
-		Timeout:   time.Duration(*timeout) * time.Second,
-	}
-
-	base      = flag.String("u", "", "URL to enumerate")
-	wordlist  = flag.String("w", "dict.txt", "Wordlist file")
-	method    = flag.String("M", "GET", "Request method (HEAD / GET)")
-	ext       = flag.String("e", "", "Extension to add to requests (comma sep)")
-	cookie    = flag.String("c", "", "Cookies (format: name=value;name=value)")
-	skip_code = flag.String("x", "", "Status codes to exclude (comma sep)")
-	skip_size = flag.String("s", "", "Skip sizes (comma sep)")
+	base     = flag.String("u", "", "URL to enumerate")
+	wordlist = flag.String("w", "dict.txt", "Wordlist file")
+	method   = flag.String("M", "GET", "Request method (HEAD / GET)")
+	ext      = flag.String("e", "", "Extension to add to requests (comma sep)")
+	cookie   = flag.String("c", "", "Cookies (format: name=value;name=value)")
+	skipCode = flag.String("x", "", "Status codes to exclude (comma sep)")
+	skipSize = flag.String("s", "", "Skip sizes (comma sep)")
 
 	maxerrors = flag.Uint64("E", 10, "Max. errors before exiting")
-	size_min  = flag.Int64("sm", -1, "Skip size (min value)")
-	size_max  = flag.Int64("sM", -1, "Skip size (max value)")
+	sizeMin   = flag.Int64("sm", -1, "Skip size (min value)")
+	sizeMax   = flag.Int64("sM", -1, "Skip size (max value)")
 	threads   = flag.Int("t", 10, "Number of concurrent goroutines")
 	timeout   = flag.Int("T", 10, "Timeout before killing the request")
 
 	only200 = flag.Bool("2", false, "Only display responses with 200 status code")
 	follow  = flag.Bool("f", false, "Follow redirects")
-	ext_all = flag.Bool("ef", false, "Add extension to all requests (dirbuster style)")
+	extAll  = flag.Bool("ef", false, "Add extension to all requests (dirbuster style)")
 	waf     = flag.Bool("waf", false, "Inject 'WAF bypass' headers")
-)
 
-// check if host is alive before going all the trouble
-func IsAlive(url string) bool {
-	res, err := client.Get(*base)
-	if err != nil {
-		r.Fprintf(os.Stderr, "Could not connect to %s: %v\n", *base, err)
-		return false
+	client = &http.Client{
+		Transport: &http.Transport{
+			MaxIdleConns:        *threads,
+			MaxIdleConnsPerHost: *threads,
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
+		Timeout: time.Duration(*timeout) * time.Second,
 	}
 
-	defer res.Body.Close()
+	normalized string
+	m          *brutemachine.Machine
+	errors     = uint64(0)
+	extensions []string
+	skipCodes  = make(map[int]struct{})
+	skipSizes  = make(map[int64]struct{})
+)
 
-	io.Copy(ioutil.Discard, res.Body)
+// isAlive checks if host is alive before going all the trouble
+func isAlive(url string) bool {
+	res, err := client.Get(*base)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "could not connect to %s: %v\n", *base, err)
+		return false
+	}
+	defer res.Body.Close()
 
 	return true
 }
 
-// make a bogus request to calibrate the 404 engine
-func Check404(url string) (int, int64, error) {
+func contentLenght(res *http.Response) (int64, error) {
+	cl := res.Header.Get("Content-Length")
+	size, err := strconv.ParseInt(cl, 10, 64)
+	if cl == "" || err != nil || size <= 0 {
+		b, err := ioutil.ReadAll(res.Body)
+		if err != nil {
+			return 0, err
+		}
+
+		size = int64(len(b))
+	}
+
+	return size, nil
+}
+
+// check404 makes a bogus request to calibrate the 404 engine
+func check404(url string) (int, int64, error) {
 	test := uuid.Must(uuid.NewV4()).String()
 
 	res, err := client.Get(*base + test)
 	if err != nil {
 		return 0, 0, err
 	}
-
 	defer res.Body.Close()
 
-	size, _ := strconv.ParseInt(res.Header.Get("content-length"), 10, 64)
-
-	if size <= 0 {
-		content, err := ioutil.ReadAll(res.Body)
-		if err != nil {
-			return 0, 0, err
-		}
-		size = int64(len(content))
-	} else {
-		io.Copy(ioutil.Discard, res.Body)
+	size, err := contentLenght(res)
+	if err != nil {
+		return 0, 0, err
 	}
 
 	return res.StatusCode, size, nil
 }
 
-// handles requests. moved some stuff out for speed
-// reduced error output for practical reasons
-func DoRequest(page string, ext string) interface{} {
+// do sends HTTP requests to the page.
+func do(page, ext string) brutemachine.Printer {
 	// base url + word
 	url := *base + page
 
 	// add .ext to every request, or
-	if ext != "" && *ext_all {
+	if ext != "" && *extAll {
 		url = url + "." + ext
 	}
 
 	// replace .ext where needed
-	if ext != "" && !*ext_all {
+	if ext != "" && !*extAll {
 		url = strings.Replace(url, "%EXT%", ext, -1)
 	}
 
 	// build request
 	req, err := http.NewRequest(*method, url, nil)
 	if err != nil {
-		return nil
+		atomic.AddUint64(&errors, 1)
+		return &Result{url: url, err: fmt.Errorf("could not create request: %v", err)}
 	}
 
 	// some servers have issues with */*, some others will serve
@@ -163,81 +151,68 @@ func DoRequest(page string, ext string) interface{} {
 		req.Header.Set("X-Originating-IP", "127.0.0.1")
 	}
 
-	resp, err := client.Do(req)
+	res, err := client.Do(req)
 	if err != nil {
 		atomic.AddUint64(&errors, 1)
-		return Result{url, 0, 0, "", err}
+		return &Result{url: req.RequestURI, err: fmt.Errorf("could not request %s: %v", req.RequestURI, err)}
 	}
-
 	// https://gist.github.com/mholt/eba0f2cc96658be0f717
-	defer resp.Body.Close()
+	defer res.Body.Close()
 
-	size := int64(0)
+	_, ok := skipCodes[res.StatusCode]
+	if (res.StatusCode == http.StatusOK && *only200) || (!ok && !*only200) {
+		location := res.Header.Get("Location")
 
-	// useful comment
-	if (resp.StatusCode == http.StatusOK && *only200) || (!skip_codes[resp.StatusCode] && !*only200) {
-		// try content-length first
-		size, _ = strconv.ParseInt(resp.Header.Get("content-length"), 10, 64)
-
-		// fallback to body length
-		if size <= 0 {
-			content, err := ioutil.ReadAll(resp.Body)
-			if err == nil {
-				size = int64(len(content))
-			}
-		} else {
-			io.Copy(ioutil.Discard, resp.Body)
+		size, err := contentLenght(res)
+		if err != nil {
+			return &Result{url, res.StatusCode, 0, location, err}
 		}
 
 		// skip if size is as requested, or included in a given range
-		if skip_sizes[size] {
+		_, ok := skipSizes[size]
+		if !ok {
 			return nil
 		}
 
-		if size >= *size_min && size <= *size_max {
+		if size >= *sizeMin && size <= *sizeMax {
 			return nil
 		}
 
-		return Result{url, resp.StatusCode, size, resp.Header.Get("location"), nil}
+		return &Result{
+			url:      url,
+			status:   res.StatusCode,
+			size:     size,
+			location: location,
+		}
 	}
-
-	io.Copy(ioutil.Discard, resp.Body)
 
 	return nil
 }
 
-func OnResult(res interface{}) {
-	result, ok := res.(Result)
-
-	if !ok {
-		r.Fprintf(os.Stderr, "Error while converting result.")
-		return
-	}
-
-	switch {
-	case result.status == http.StatusNotFound:
-		return
-
-	case result.err != nil:
-		r.Fprintf(os.Stderr, "%s : %v\n", result.url, result.err)
-
-	case result.status >= 200 && result.status < 300:
-		g.Printf("%-3d %-9d %s\n", result.status, result.size, result.url)
-
-	case result.status >= 300 && result.status < 400:
-		b.Printf("%-3d %-9d %s -> %s\n", result.status, result.size, result.url, result.location)
-
-	case result.status >= 400 && result.status < 500:
-		y.Printf("%-3d %-9d %s\n", result.status, result.size, result.url)
-
-	case result.status >= 500 && result.status < 600:
-		r.Printf("%-3d %-9d %s\n", result.status, result.size, result.url)
-	}
-
+// onResult handles each result.
+var onResult = func(res brutemachine.Printer) {
 	if errors > *maxerrors {
-		r.Fprintf(os.Stderr, "\nExceeded %d errors, quitting...", *maxerrors)
+		fmt.Fprintf(os.Stderr, "\nExceeded %d errors, quitting...", *maxerrors)
 		os.Exit(1)
 	}
+	res.Print()
+}
+
+// summary prints a short summary.
+func summary() {
+	codes := make([]int, 0, len(skipCodes))
+	for key := range skipCodes {
+		codes = append(codes, key)
+	}
+
+	sizes := make([]int64, 0, len(skipSizes))
+	for key := range skipSizes {
+		sizes = append(sizes, key)
+	}
+
+	fmt.Fprintf(os.Stderr, "Skipping codes: %v\n", codes)
+	fmt.Fprintf(os.Stderr, "Skipping sizes: %v\n", sizes)
+	fmt.Fprintf(os.Stderr, "Extensions: %v\n", extensions)
 }
 
 func main() {
@@ -246,75 +221,65 @@ func main() {
 	// create a list of extensions
 	extensions = append(extensions, "")
 	if *ext != "" {
-		for _, x := range strings.Split(*ext, ",") {
-			extensions = append(extensions, x)
-		}
+		extensions = append(extensions, strings.Split(*ext, ",")...)
 	}
 
 	// create a list of exclusions
-	if *skip_code != "" {
-		for _, x := range strings.Split(*skip_code, ",") {
-			y, _ := strconv.Atoi(x)
-			skip_codes[y] = true
+	if *skipCode != "" {
+		for _, x := range strings.Split(*skipCode, ",") {
+			y, err := strconv.Atoi(x)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "could not parse code '%v'\n", x)
+				continue
+			}
+			skipCodes[y] = struct{}{}
 		}
 	}
 
 	// exclude sizes
-	if *skip_size != "" {
-		for _, x := range strings.Split(*skip_size, ",") {
-			y, _ := strconv.ParseInt(x, 10, 64)
-			skip_sizes[y] = true
+	if *skipSize != "" {
+		for _, x := range strings.Split(*skipSize, ",") {
+			y, err := strconv.ParseInt(x, 10, 64)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "could not parse size '%v'\n", x)
+				continue
+			}
+			skipSizes[y] = struct{}{}
 		}
 	}
 
 	// set redirects policy
 	if !*follow {
-		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		}
 	}
 
-	// check if alive or fuck off
-	if !IsAlive(*base) {
-		os.Exit(0)
+	// check if host is alive.
+	if !isAlive(*base) {
+		return
 	}
 
-	// calibrate the 404 detection engine, let's do it a few times
-	x, y, err := Check404(*base)
+	// calibrate the 404 detection engine.
+	x, y, err := check404(*base)
 	if err != nil {
-		os.Exit(0)
+		return
 	}
 
 	// add found codes and sizes to the skip list
-	if !skip_codes[x] && !skip_sizes[y] {
-		skip_codes[x] = true
-		skip_sizes[y] = true
-	}
+	skipCodes[x] = struct{}{}
+	skipSizes[y] = struct{}{}
 
-	// print a short summary
-	var keys []string
-	for key, _ := range skip_codes {
-		keys = append(keys, strconv.Itoa(key))
-	}
-	fmt.Fprintf(os.Stderr, "\nSkipping codes: %s\n", strings.Join(keys, ","))
+	// print a short summary.
+	summary()
 
-	keys = nil
-	for key, _ := range skip_sizes {
-		keys = append(keys, strconv.FormatInt(key, 10))
-	}
-	fmt.Fprintf(os.Stderr, "Skipping sizes: %s\n\n", strings.Join(keys, ","))
-
-	// start
-	m = brutemachine.New(*threads, *wordlist, extensions, DoRequest, OnResult)
-
+	m = brutemachine.New(*threads, *wordlist, extensions, do, onResult)
 	if err := m.Start(); err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "could not start bruteforce: %v\n", err)
 	}
-
 	m.Wait()
 
-	g.Fprintln(os.Stderr, "\nDONE")
-
+	fmt.Fprintf(os.Stderr, "\nDONE\n")
 	printStats()
 }
 
@@ -324,7 +289,9 @@ func main() {
 func setup() {
 	flag.Parse()
 
-	if err := dirsearch.NormalizeURL(base); err != nil {
+	var err error
+	normalized, err = dirsearch.NormalizeURL(*base)
+	if err != nil {
 		fmt.Println(err)
 		flag.Usage()
 		os.Exit(1)
@@ -338,7 +305,7 @@ func setup() {
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-signals
-		r.Fprintln(os.Stderr, "\nINTERRUPTING...")
+		fmt.Fprintf(os.Stderr, "\nINTERRUPTING...\n")
 		printStats()
 		os.Exit(0)
 	}()

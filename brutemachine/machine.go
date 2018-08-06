@@ -7,55 +7,44 @@ import (
 	"time"
 )
 
-// This structure contains some runtime statistics.
-type Statistics struct {
-	// Time the execution started
-	Start time.Time
-	// Time the execution finished
-	Stop time.Time
-	// Total duration of the execution
-	Total time.Duration
-	// Total number of inputs from the wordlist
-	Inputs uint64
-	// Executions per second
-	Eps float64
-	// Total number of executions
-	Execs uint64
-	// Total number of executions with positive results.
-	Results uint64
+// Printer interface is a printable brutemachine result.
+type Printer interface {
+	Print()
 }
 
-// This is where the main logic goes.
-type RunHandler func(line string, ext string) interface{}
+// RunHandler handles brutemachine logic.
+type RunHandler func(line, ext string) Printer
 
-// This is where positive results are handled.
-type ResultHandler func(result interface{})
+// ResHandler handles brutemachine results.
+type ResHandler func(result Printer)
 
-// The main object.
+// Machine represents a bruteforcing machine.
 type Machine struct {
 	// Runtime statistics.
 	Stats Statistics
 	// Number of input consumers.
 	consumers uint
-	// Dictionary file name.
-	filename string
+	// Wordlist from where items are read.
+	wordlist string
 	// Extensions
 	extensions []string
 	// Positive results channel.
-	output chan interface{}
+	output chan Printer
 	// Inputs channel.
 	input chan string
 	// WaitGroup to stop while the machine is running.
 	wait sync.WaitGroup
 	// Main logic handler.
-	run_handler RunHandler
+	runHandler RunHandler
 	// Positive results handler.
-	res_handler ResultHandler
+	resHandler ResHandler
 }
 
-// Builds a new machine object, if consumers is less or equal than 0, CPU*2 will be used as default value.
-func New(consumers int, filename string, extensions []string, run_handler RunHandler, res_handler ResultHandler) *Machine {
-	workers := uint(0)
+// New builds a new machine object.
+//
+// If consumers is less or equal than 0, CPU*2 will be used as default value.
+func New(consumers int, wordlist string, extensions []string, runHandler RunHandler, resHandler ResHandler) *Machine {
+	var workers uint
 	if consumers <= 0 {
 		workers = uint(runtime.NumCPU() * 2)
 	} else {
@@ -63,15 +52,15 @@ func New(consumers int, filename string, extensions []string, run_handler RunHan
 	}
 
 	return &Machine{
-		Stats:       Statistics{},
-		consumers:   workers,
-		filename:    filename,
-		extensions:  extensions,
-		output:      make(chan interface{}),
-		input:       make(chan string),
-		wait:        sync.WaitGroup{},
-		run_handler: run_handler,
-		res_handler: res_handler,
+		Stats:      Statistics{},
+		consumers:  workers,
+		wordlist:   wordlist,
+		extensions: extensions,
+		output:     make(chan Printer),
+		input:      make(chan string),
+		wait:       sync.WaitGroup{},
+		runHandler: runHandler,
+		resHandler: resHandler,
 	}
 }
 
@@ -80,7 +69,7 @@ func (m *Machine) inputConsumer() {
 		for _, ex := range m.extensions {
 			atomic.AddUint64(&m.Stats.Execs, 1)
 
-			res := m.run_handler(in, ex)
+			res := m.runHandler(in, ex)
 			if res != nil {
 				atomic.AddUint64(&m.Stats.Results, 1)
 				m.output <- res
@@ -92,7 +81,7 @@ func (m *Machine) inputConsumer() {
 
 func (m *Machine) outputConsumer() {
 	for res := range m.output {
-		m.res_handler(res)
+		m.resHandler(res)
 	}
 }
 
@@ -109,21 +98,21 @@ func (m *Machine) Start() error {
 	m.Stats.Start = time.Now()
 
 	// count the inputs we have
-	lines, err := LineReader(m.filename, 0)
+	lines, err := LineReader(m.wordlist, 0)
 	if err != nil {
 		return err
 	}
-	for _ = range lines {
+	for range lines {
 		m.Stats.Inputs++
 	}
 
-	lines, err = LineReader(m.filename, 0)
+	lines, err = LineReader(m.wordlist, 0)
 	if err != nil {
 		return err
 	}
 	for line := range lines {
 		m.input <- line
-		for _, _ = range m.extensions {
+		for range m.extensions {
 			m.wait.Add(1)
 		}
 	}
@@ -131,6 +120,7 @@ func (m *Machine) Start() error {
 	return nil
 }
 
+// UpdateStats updates machine statistics.
 func (m *Machine) UpdateStats() {
 	m.Stats.Stop = time.Now()
 	m.Stats.Total = m.Stats.Stop.Sub(m.Stats.Start)
