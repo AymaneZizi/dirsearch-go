@@ -21,7 +21,7 @@ func (res Result) Print() {
 		return
 
 	case res.err != nil:
-		r.Fprintf(os.Stderr, "%s : %v\n", res.url, res.err)
+		r.Fprintf(os.Stderr, "%v\n", res.err)
 
 	case res.status >= 200 && res.status < 300:
 		g.Printf("%-3d %-9d %s\n", res.status, res.size, res.url)
