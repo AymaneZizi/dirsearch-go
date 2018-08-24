@@ -44,16 +44,9 @@ var (
 	follow    = flag.Bool("f", false, "Follow redirects")
 	waf       = flag.Bool("waf", false, "Inject 'WAF bypass' headers")
 
-	client = &http.Client{
-		Transport: &http.Transport{
-			MaxIdleConns:        *threads,
-			MaxIdleConnsPerHost: *threads,
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
-			},
-		},
-		Timeout: time.Duration(*timeout) * time.Second,
-	}
+	// declare this here
+	client    *http.Client
+	transport *http.Transport
 
 	g = color.New(color.FgGreen)
 	y = color.New(color.FgYellow)
@@ -341,6 +334,18 @@ func main() {
 // are gonna be mandatory for unit test modules.
 func setup() {
 	flag.Parse()
+
+	// initialize the client and transport here *after* parsing the options...
+	client = &http.Client{
+		Transport: &http.Transport{
+			MaxIdleConns:        *threads,
+			MaxIdleConnsPerHost: *threads,
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
+		Timeout: time.Duration(*timeout) * time.Second,
+	}
 
 	var err error
 	*base, err = dirsearch.NormalizeURL(*base)
