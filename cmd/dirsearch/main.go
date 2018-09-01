@@ -63,7 +63,7 @@ var (
 	test404    = []string{
 		"th1s-1s-4-r4nd0m-f1l3",
 		"th1s-1s-4-r4nd0m-f0ld3r/",
-		"th1s-5h0uld-n07-3x1s7.php?s0m3=th1ng",
+		"?s0m3=th1ng",
 		".htpasswdAncheNo",
 		"adminFalsucci",
 	}
@@ -339,6 +339,7 @@ func setup() {
 	client = &http.Client{
 		Transport: &http.Transport{
 			MaxIdleConns:        *threads,
+			MaxConnsPerHost:     *threads,
 			MaxIdleConnsPerHost: *threads,
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: true,
@@ -376,6 +377,6 @@ func printStats() {
 	fmt.Fprintln(os.Stderr, "Requests  :", m.Stats.Execs)
 	fmt.Fprintln(os.Stderr, "Errors    :", errors)
 	fmt.Fprintln(os.Stderr, "Results   :", m.Stats.Results)
-	fmt.Fprintln(os.Stderr, "Time      :", m.Stats.Total.Seconds(), "s")
+	fmt.Fprintln(os.Stderr, "Time      :", m.Stats.Total)
 	fmt.Fprintln(os.Stderr, "Req/s     :", m.Stats.Eps, "\n")
 }
