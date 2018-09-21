@@ -43,6 +43,7 @@ var (
 	only200   = flag.Bool("2", false, "Only display responses with 200 status code")
 	follow    = flag.Bool("f", false, "Follow redirects")
 	waf       = flag.Bool("waf", false, "Inject 'WAF bypass' headers")
+	verbose   = flag.Bool("v", false, "Verbose: print all results (except 404)")
 
 	// declare this here
 	client    *http.Client
@@ -63,7 +64,6 @@ var (
 	test404    = []string{
 		"th1s-1s-4-r4nd0m-f1l3",
 		"th1s-1s-4-r4nd0m-f0ld3r/",
-		"?s0m3=th1ng",
 		".htpasswdAncheNo",
 		"adminFalsucci",
 	}
@@ -87,20 +87,24 @@ func isAlive(url string) bool {
 
 // returns the content-length or the size of the body
 // note: content-length can lie
-func contentLenght(res *http.Response) (int64, error) {
-	cl := res.Header.Get("Content-Length")
-	size, err := strconv.ParseInt(cl, 10, 64)
-	if size <= 0 || err != nil {
-		b, err := ioutil.ReadAll(res.Body)
-		if err != nil {
-			return 0, err
+func contentLength(res *http.Response) (int64, error) {
+	var err error
+	size := res.ContentLength
+
+	if size <= 0 {
+		cl := res.Header.Get("Content-Length")
+		size, err = strconv.ParseInt(cl, 10, 64)
+		if size <= 0 || err != nil {
+			b, err := ioutil.ReadAll(res.Body)
+			if err != nil {
+				return 0, err
+			}
+			size = int64(len(b))
 		}
-		size = int64(len(b))
-	} else {
-		// no :( don't touch this
-		io.Copy(ioutil.Discard, res.Body)
 	}
 
+	// no :( don't touch this
+	io.Copy(ioutil.Discard, res.Body)
 	return size, nil
 }
 
@@ -113,7 +117,7 @@ func check404(url string) (int, int64, error) {
 
 	defer res.Body.Close()
 
-	size, err := contentLenght(res)
+	size, err := contentLength(res)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -156,7 +160,7 @@ func do(page, ext string) brutemachine.Printer {
 
 	// attempt to bypass waf if asked to do so
 	if *waf {
-		req.Header.Set("Referer", *base)
+		req.Header.Set("Referer", url)
 		req.Header.Set("X-Client-IP", "127.0.0.1")
 		req.Header.Set("X-Remote-IP", "127.0.0.1")
 		req.Header.Set("X-Remote-Addr", "127.0.0.1")
@@ -177,23 +181,26 @@ func do(page, ext string) brutemachine.Printer {
 
 	_, skip := skipCodes[res.StatusCode]
 
-	// skip certain status codes (auto-skip, and user defined)
-	if (res.StatusCode == http.StatusOK && *only200) || (!skip && !*only200) {
+	// "skip status code" logic:
+	//   - if 200 and only 200 -> pass
+	//   - if not detected as wildcard, and not only 200 -> pass
+	//   - if verbose -> pass
+	if ((res.StatusCode == http.StatusOK) && *only200) || (!skip && !*only200) || *verbose {
 		location := res.Header.Get("Location")
 
-		size, err := contentLenght(res)
+		size, err := contentLength(res)
 		if err != nil {
 			return &Result{url, res.StatusCode, 0, location, err}
 		}
 
 		// skip certain sizes (auto-skip, and user defined)
 		_, skip := skipSizes[size]
-		if skip {
+		if skip && !*verbose {
 			return nil
 		}
 
 		// skip a range of sizes
-		if size >= *sizeMin && size <= *sizeMax {
+		if size >= *sizeMin && size <= *sizeMax && !*verbose {
 			return nil
 		}
 
@@ -239,6 +246,9 @@ func summary() {
 	if *sizeMin > 0 && *sizeMax > 0 {
 		fmt.Fprintf(os.Stderr, " + [%d-%d]", *sizeMin, *sizeMax)
 	}
+	if *verbose {
+		fmt.Fprintf(os.Stderr, "*")
+	}
 	fmt.Fprintf(os.Stderr, "\nExtensions: %v", extensions)
 	if wfuzz {
 		fmt.Fprintf(os.Stderr, "*")
@@ -268,7 +278,9 @@ func main() {
 				r.Fprintln(os.Stderr, "could not parse code:", x)
 				continue
 			}
-			skipCodes[y] = struct{}{}
+			if y != http.StatusOK {
+				skipCodes[y] = struct{}{}
+			}
 		}
 	}
 
