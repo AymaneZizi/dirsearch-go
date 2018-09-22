@@ -139,7 +139,7 @@ func do(page, ext string) brutemachine.Printer {
 	// add .ext to every request, or replace where needed
 	// 06/08: %EXT% removed for the time being, bug a rotta de collo
 	if ext != "" {
-		url = url + "." + ext
+		url = url + ext
 	}
 
 	// build request
@@ -304,7 +304,7 @@ func main() {
 	}
 
 	// check if host is alive.
-	if !isAlive(*base) {
+	if !isAlive(strings.Split(*base, "{")[0]) {
 		return
 	}
 
@@ -313,7 +313,7 @@ func main() {
 	// 2. a request to a sensible, non-existent hidden file
 	// 3. a request with "admin" in it
 	for _, test := range test404 {
-		x, y, err := check404(*base + test)
+		x, y, err := check404(strings.Split(*base, "{")[0] + test)
 		if err != nil {
 			return
 		}
