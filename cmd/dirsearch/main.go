@@ -30,7 +30,7 @@ var (
 	base      = flag.String("u", "", "URL to enumerate, use {} to replace keyword")
 	wordlist  = flag.String("w", "dict.txt", "Wordlist file")
 	method    = flag.String("M", "GET", "Request method (HEAD / GET)")
-	ext       = flag.String("e", "", "Extension to add to requests (comma sep)")
+	ext       = flag.String("e", "", "Extension to add to requests ('.ext,.ext')")
 	cookie    = flag.String("c", "", "Cookies (format: name=value;name=value)")
 	skipCode  = flag.String("x", "", "Status codes to exclude (comma sep)")
 	skipSize  = flag.String("s", "", "Skip sizes (comma sep)")
