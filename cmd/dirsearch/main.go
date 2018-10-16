@@ -142,6 +142,11 @@ func do(page, ext string) brutemachine.Printer {
 		url = url + ext
 	}
 
+	// print progress
+	if m.Stats.Execs%100 == 0 {
+		printStatus()
+	}
+
 	// build request
 	req, err := http.NewRequest(*method, url, nil)
 	if err != nil {
@@ -214,11 +219,6 @@ func do(page, ext string) brutemachine.Printer {
 
 	// bad jimeno :(
 	io.Copy(ioutil.Discard, res.Body)
-
-	// print progress
-	if m.Stats.Execs%100 == 0 {
-		printStatus()
-	}
 
 	return nil
 }

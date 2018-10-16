@@ -2,7 +2,6 @@ package main
 
 import (
 	"net/http"
-	"os"
 )
 
 // Result is a bruteforced result.
@@ -21,7 +20,8 @@ func (res Result) Print() {
 		return
 
 	case res.err != nil:
-		r.Fprintf(os.Stderr, "%v\n", res.err)
+		//r.Fprintf(os.Stderr, "%v\n", res.err)
+		return
 
 	case res.status >= 200 && res.status < 300:
 		g.Printf("%-3d %-9d %s\n", res.status, res.size, res.url)
