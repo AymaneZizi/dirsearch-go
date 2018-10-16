@@ -224,6 +224,9 @@ var onResult = func(res brutemachine.Printer) {
 		r.Fprintf(os.Stderr, "\nExceeded %d errors, quitting...\n", *maxerrors)
 		os.Exit(1)
 	}
+	if m.Stats.Execs%100 == 0 {
+		printStatus()
+	}
 	res.Print()
 }
 
@@ -391,4 +394,10 @@ func printStats() {
 	fmt.Fprintln(os.Stderr, "Results   :", m.Stats.Results)
 	fmt.Fprintln(os.Stderr, "Time      :", m.Stats.Total)
 	fmt.Fprintln(os.Stderr, "Req/s     :", m.Stats.Eps, "\n")
+}
+
+// Print status bar
+func printStatus() {
+	m.UpdateStats()
+	fmt.Fprintf(os.Stderr, "Status    : %d / %d (%.0f Req/s)\r", m.Stats.Execs, m.Stats.Inputs, m.Stats.Eps)
 }
