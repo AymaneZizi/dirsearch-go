@@ -215,6 +215,11 @@ func do(page, ext string) brutemachine.Printer {
 	// bad jimeno :(
 	io.Copy(ioutil.Discard, res.Body)
 
+	// print progress
+	if m.Stats.Execs%100 == 0 {
+		printStatus()
+	}
+
 	return nil
 }
 
@@ -223,9 +228,6 @@ var onResult = func(res brutemachine.Printer) {
 	if errors > *maxerrors {
 		r.Fprintf(os.Stderr, "\nExceeded %d errors, quitting...\n", *maxerrors)
 		os.Exit(1)
-	}
-	if m.Stats.Execs%100 == 0 {
-		printStatus()
 	}
 	res.Print()
 }

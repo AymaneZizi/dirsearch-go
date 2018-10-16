@@ -114,6 +114,8 @@ func (m *Machine) Start() error {
 	for range lines {
 		m.Stats.Inputs++
 	}
+	// multiply by the number of extensions
+	m.Stats.Inputs *= uint64(len(m.extensions))
 
 	lines, err = LineReader(m.wordlist, 0)
 	if err != nil {
