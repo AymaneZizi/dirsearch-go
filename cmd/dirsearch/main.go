@@ -53,6 +53,7 @@ var (
 	y = color.New(color.FgYellow)
 	r = color.New(color.FgRed)
 	b = color.New(color.FgBlue)
+	n = color.New(color.FgMagenta)
 
 	m          *brutemachine.Machine
 	wfuzz      bool
