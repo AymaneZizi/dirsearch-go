@@ -24,6 +24,7 @@ import (
 	"github.com/eur0pa/dirsearch-go"
 	"github.com/eur0pa/dirsearch-go/brutemachine"
 	"github.com/fatih/color"
+	"github.com/jpillora/go-tld"
 )
 
 var (
@@ -48,6 +49,9 @@ var (
 	// declare this here
 	client    *http.Client
 	transport *http.Transport
+
+	// replace keywords map
+	replace = make(map[string]string)
 
 	g = color.New(color.FgGreen)
 	y = color.New(color.FgYellow)
@@ -136,6 +140,16 @@ func do(page, ext string) brutemachine.Printer {
 	if wfuzz {
 		url = strings.Replace(*base, "{}", page, -1)
 	}
+
+	// replace keywords, after the initial {}
+	// {HOST}: target's domain name
+	// {TLD} : target's top-level domain
+	// {YEAR}: current year as YYYY
+	r := strings.NewReplacer("{SUB}", replace["sub"],
+		"{HOST}", replace["host"],
+		"{TLD}", replace["tld"],
+		"{YEAR}", replace["year"])
+	url = r.Replace(url)
 
 	// add .ext to every request, or replace where needed
 	// 06/08: %EXT% removed for the time being, bug a rotta de collo
@@ -335,6 +349,13 @@ func main() {
 
 	// add this last so it won't print
 	extensions = append(extensions, "")
+
+	// populate the target map
+	x, _ := tld.Parse(*base)
+	replace["sub"] = x.Subdomain
+	replace["host"] = x.Domain
+	replace["tld"] = x.TLD
+	replace["year"] = time.Now().Format("2006")
 
 	m = brutemachine.New(*threads, *wordlist, extensions, *delay, do, onResult)
 	if err := m.Start(); err != nil {
