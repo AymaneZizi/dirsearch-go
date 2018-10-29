@@ -142,8 +142,9 @@ func do(page, ext string) brutemachine.Printer {
 	}
 
 	// replace keywords, after the initial {}
-	// {HOST}: target's domain name
-	// {TLD} : target's top-level domain
+	// {SUB} : target's subdomains
+	// {HOST}: target's root domain name
+	// {TLD} : target's top-level domain or public suffix
 	// {YEAR}: current year as YYYY
 	r := strings.NewReplacer("{SUB}", replace["sub"],
 		"{HOST}", replace["host"],
@@ -350,7 +351,7 @@ func main() {
 	// add this last so it won't print
 	extensions = append(extensions, "")
 
-	// populate the target map
+	// populate the replacement map
 	x, _ := tld.Parse(*base)
 	replace["sub"] = x.Subdomain
 	replace["host"] = x.Domain
