@@ -352,10 +352,12 @@ func main() {
 	extensions = append(extensions, "")
 
 	// populate the replacement map
-	x, _ := tld.Parse(*base)
-	replace["sub"] = x.Subdomain
-	replace["host"] = x.Domain
-	replace["tld"] = x.TLD
+	x, err := tld.Parse(*base)
+	if err == nil {
+		replace["sub"] = x.Subdomain
+		replace["host"] = x.Domain
+		replace["tld"] = x.TLD
+	}
 	replace["year"] = time.Now().Format("2006")
 
 	m = brutemachine.New(*threads, *wordlist, extensions, *delay, do, onResult)
