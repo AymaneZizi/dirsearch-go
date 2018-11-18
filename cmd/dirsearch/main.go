@@ -36,6 +36,8 @@ var (
 	cookie    = flag.String("c", "", "Cookies (format: name=value;name=value)")
 	skipCode  = flag.String("x", "", "Status codes to exclude (comma sep)")
 	skipSize  = flag.String("s", "", "Skip sizes (comma sep)")
+	useragent = flag.String("U", "random", "Custom user agent")
+	headers   = flag.String("H", "", "Add custom header (name:value;name=value)")
 	maxerrors = flag.Uint64("E", 10, "Max. errors before exiting")
 	delay     = flag.Int64("d", 0, "Delay between requests (milliseconds)")
 	sizeMin   = flag.Int64("sm", -1, "Skip size (min value)")
@@ -173,12 +175,27 @@ func do(page, ext string) brutemachine.Printer {
 
 	// some servers have issues with */*, some others will serve
 	// different content
-	req.Header.Set("User-Agent", dirsearch.GetRandomUserAgent())
+	ua := dirsearch.GetRandomUserAgent()
+	if *useragent != "random" && *useragent != "" {
+		ua = *useragent
+	}
+	req.Header.Set("User-Agent", ua)
 	req.Header.Set("Accept", "*/*")
 
 	// add cookies
 	if *cookie != "" {
 		req.Header.Set("Cookie", *cookie)
+	}
+
+	// add custom headers
+	if *headers != "" {
+		for _, hh := range strings.Split(*headers, ";") {
+			h := strings.Split(hh, ":")
+			if h[0] != "" && h[1] != "" {
+				k, v := h[0], h[1]
+				req.Header.Set(k, v)
+			}
+		}
 	}
 
 	// attempt to bypass waf if asked to do so
