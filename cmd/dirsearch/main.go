@@ -13,6 +13,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"net/http"
+	"net/http/httputil"
 	"os"
 	"os/signal"
 	"strconv"
@@ -45,6 +46,7 @@ var (
 	follow    = flag.Bool("f", false, "Follow redirects")
 	waf       = flag.Bool("waf", false, "Inject 'WAF bypass' headers")
 	verbose   = flag.Bool("v", false, "Verbose: print all results (except 404)")
+	debug     = flag.Bool("vv", false, "Debug: dump bodies")
 
 	// declare this here
 	client    *http.Client
@@ -199,6 +201,15 @@ func do(page, ext string) brutemachine.Printer {
 	}
 
 	defer res.Body.Close()
+
+	if *debug {
+		r, err := httputil.DumpRequest(req, true)
+		if err == nil {
+			b, _ := ioutil.ReadAll(res.Body)
+			fmt.Println(string(r))
+			fmt.Println(string(b))
+		}
+	}
 
 	_, skip := skipCodes[res.StatusCode]
 
