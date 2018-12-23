@@ -149,22 +149,20 @@ func do(page, ext string) brutemachine.Printer {
 	// {HOST}: target's root domain name
 	// {TLD} : target's top-level domain or public suffix
 	// {YEAR}: current year as YYYY
-	r := strings.NewReplacer("{YEAR}", replace["year"])
-	url = r.Replace(url)
-
+	url = strings.Replace(url, "{YEAR}", replace["year"], -1)
 	if replace["sub"] != "" {
-		r = strings.NewReplacer("{SUB}", replace["sub"])
-		url = r.Replace(url)
+		url = strings.Replace(url, "{SUB}", replace["sub"], -1)
 	}
-
 	if replace["host"] != "" {
-		r = strings.NewReplacer("{HOST}", replace["host"])
-		url = r.Replace(url)
+		url = strings.Replace(url, "{HOST}", replace["host"], -1)
 	}
-
 	if replace["tld"] != "" {
-		r = strings.NewReplacer("{TLD}", replace["tld"])
-		url = r.Replace(url)
+		url = strings.Replace(url, "{TLD}", replace["tld"], -1)
+	}
+	if strings.Contains(url, "{SUB}") ||
+		strings.Contains(url, "{HOST}") ||
+		strings.Contains(url, "{TLD}") {
+		return nil
 	}
 
 	// add .ext to every request, or replace where needed
