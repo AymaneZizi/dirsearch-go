@@ -31,20 +31,18 @@ import (
 var (
 	base      = flag.String("u", "", "URL to enumerate, use {} to replace keyword")
 	wordlist  = flag.String("w", "dict.txt", "Wordlist file")
-	method    = flag.String("M", "GET", "Request method (HEAD / GET)")
+	method    = flag.String("M", "GET", "Request method")
 	ext       = flag.String("e", "", "Extension to add to requests ('.ext,.ext')")
 	cookie    = flag.String("c", "", "Cookies (format: name=value;name=value)")
-	skipCode  = flag.String("x", "", "Status codes to exclude (comma sep)")
-	skipSize  = flag.String("s", "", "Skip sizes (comma sep)")
+	skipCode  = flag.String("x", "", "Status codes to exclude (403,500,...)")
+	onlyCode  = flag.String("X", "", "Status codes to include (200,405,...)")
+	skipSize  = flag.String("s", "", "Skip sizes (10,20,30-50,...)")
 	useragent = flag.String("U", "random", "Custom user agent")
 	headers   = flag.String("H", "", "Add custom header (name:value;name=value)")
 	maxerrors = flag.Uint64("E", 10, "Max. errors before exiting")
 	delay     = flag.Int64("d", 0, "Delay between requests (milliseconds)")
-	sizeMin   = flag.Int64("sm", -1, "Skip size (min value)")
-	sizeMax   = flag.Int64("sM", -1, "Skip size (max value)")
 	threads   = flag.Int("t", 10, "Number of concurrent goroutines")
-	timeout   = flag.Int("T", 10, "Timeout before killing the request")
-	only200   = flag.Bool("2", false, "Only display responses with 200 status code")
+	timeout   = flag.Int("T", 10, "Timeout before killing the goroutine")
 	follow    = flag.Bool("f", false, "Follow redirects")
 	waf       = flag.Bool("waf", false, "Inject 'WAF bypass' headers")
 	verbose   = flag.Bool("v", false, "Verbose: print all results (except 404)")
@@ -69,6 +67,7 @@ var (
 	extensions []string
 	errors     = uint64(0)
 	skipCodes  = make(map[int]struct{})
+	onlyCodes  = make(map[int]struct{})
 	skipSizes  = make(map[int64]struct{})
 	test404    = []string{
 		"th1s-1s-4-r4nd0m-f1l3",
@@ -150,11 +149,23 @@ func do(page, ext string) brutemachine.Printer {
 	// {HOST}: target's root domain name
 	// {TLD} : target's top-level domain or public suffix
 	// {YEAR}: current year as YYYY
-	r := strings.NewReplacer("{SUB}", replace["sub"],
-		"{HOST}", replace["host"],
-		"{TLD}", replace["tld"],
-		"{YEAR}", replace["year"])
+	r := strings.NewReplacer("{YEAR}", replace["year"])
 	url = r.Replace(url)
+
+	if replace["sub"] != "" {
+		r = strings.NewReplacer("{SUB}", replace["sub"])
+		url = r.Replace(url)
+	}
+
+	if replace["host"] != "" {
+		r = strings.NewReplacer("{HOST}", replace["host"])
+		url = r.Replace(url)
+	}
+
+	if replace["tld"] != "" {
+		r = strings.NewReplacer("{TLD}", replace["tld"])
+		url = r.Replace(url)
+	}
 
 	// add .ext to every request, or replace where needed
 	// 06/08: %EXT% removed for the time being, bug a rotta de collo
@@ -173,14 +184,16 @@ func do(page, ext string) brutemachine.Printer {
 		return nil
 	}
 
-	// some servers have issues with */*, some others will serve
-	// different content
+	// set / pick user agent
 	ua := dirsearch.GetRandomUserAgent()
 	if *useragent != "random" && *useragent != "" {
 		ua = *useragent
 	}
 	req.Header.Set("User-Agent", ua)
+
+	// some servers have issues with */*, some others will serve different content
 	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Accept-Language", "en")
 
 	// add cookies
 	if *cookie != "" {
@@ -208,6 +221,7 @@ func do(page, ext string) brutemachine.Printer {
 		req.Header.Set("X-Originating-IP", "127.0.0.1")
 	}
 
+	// send out the request
 	res, err := client.Do(req)
 	if err != nil {
 		atomic.AddUint64(&errors, 1)
@@ -219,6 +233,7 @@ func do(page, ext string) brutemachine.Printer {
 
 	defer res.Body.Close()
 
+	// verbose / debug
 	if *debug {
 		r, err := httputil.DumpRequest(req, true)
 		if err == nil {
@@ -229,12 +244,13 @@ func do(page, ext string) brutemachine.Printer {
 	}
 
 	_, skip := skipCodes[res.StatusCode]
-
+	_, only := onlyCodes[res.StatusCode]
+	_ = skip
 	// "skip status code" logic:
-	//   - if 200 and only 200 -> pass
-	//   - if not detected as wildcard, and not only 200 -> pass
+	//   - if in "only" list -> pass
+	//   - if not in "skip" list -> pass
 	//   - if verbose -> pass
-	if ((res.StatusCode == http.StatusOK) && *only200) || (!skip && !*only200) || *verbose {
+	if (only && !skip) || (*onlyCode == "" && !skip) || *verbose {
 		location := res.Header.Get("Location")
 
 		size, err := contentLength(res)
@@ -245,11 +261,6 @@ func do(page, ext string) brutemachine.Printer {
 		// skip certain sizes (auto-skip, and user defined)
 		_, skip := skipSizes[size]
 		if skip && !*verbose {
-			return nil
-		}
-
-		// skip a range of sizes
-		if size >= *sizeMin && size <= *sizeMax && !*verbose {
 			return nil
 		}
 
@@ -276,35 +287,6 @@ var onResult = func(res brutemachine.Printer) {
 	res.Print()
 }
 
-// summary prints a short summary.
-func summary() {
-	codes := make([]int, 0, len(skipCodes))
-	for key := range skipCodes {
-		if key != 404 {
-			codes = append(codes, key)
-		}
-	}
-
-	sizes := make([]int64, 0, len(skipSizes))
-	for key := range skipSizes {
-		sizes = append(sizes, key)
-	}
-
-	fmt.Fprintf(os.Stderr, "\nSkip codes: %v\n", codes)
-	fmt.Fprintf(os.Stderr, "Skip sizes: %v", sizes)
-	if *sizeMin > 0 && *sizeMax > 0 {
-		fmt.Fprintf(os.Stderr, " + [%d-%d]", *sizeMin, *sizeMax)
-	}
-	if *verbose {
-		fmt.Fprintf(os.Stderr, "*")
-	}
-	fmt.Fprintf(os.Stderr, "\nExtensions: %v", extensions)
-	if wfuzz {
-		fmt.Fprintf(os.Stderr, "*")
-	}
-	fmt.Fprintf(os.Stderr, "\nWorkers   : [%d / %d ms]\n\n", *threads, *delay)
-}
-
 func main() {
 	setup()
 
@@ -327,14 +309,25 @@ func main() {
 				r.Fprintln(os.Stderr, "could not parse code:", x)
 				continue
 			}
-			if y != http.StatusOK {
-				skipCodes[y] = struct{}{}
+			skipCodes[y] = struct{}{}
+		}
+	}
+
+	// and inclusions
+	if *onlyCode != "" {
+		for _, x := range strings.Split(*onlyCode, ",") {
+			y, err := strconv.Atoi(x)
+			if err != nil {
+				r.Fprintln(os.Stderr, "could not parse code:", x)
+				continue
 			}
+			onlyCodes[y] = struct{}{}
 		}
 	}
 
 	// exclude sizes
 	if *skipSize != "" {
+		// discrete values
 		for _, x := range strings.Split(*skipSize, ",") {
 			y, err := strconv.ParseInt(x, 10, 64)
 			if err != nil {
@@ -373,8 +366,6 @@ func main() {
 		}
 		skipSizes[y] = struct{}{}
 	}
-	// print a short summary.
-	summary()
 
 	// add this last so it won't print
 	extensions = append(extensions, "")
@@ -393,8 +384,6 @@ func main() {
 		r.Fprintln(os.Stderr, "could not start bruteforce:", err)
 	}
 	m.Wait()
-
-	g.Fprintf(os.Stderr, "\nDONE\n")
 
 	printStats()
 }
@@ -434,7 +423,6 @@ func setup() {
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-signals
-		r.Fprintf(os.Stderr, "\nINTERRUPTING...\n")
 		printStats()
 		os.Exit(0)
 	}()
@@ -443,16 +431,11 @@ func setup() {
 // Print some stats
 func printStats() {
 	m.UpdateStats()
-
-	fmt.Fprintln(os.Stderr, "Requests  :", m.Stats.Execs)
-	fmt.Fprintln(os.Stderr, "Errors    :", errors)
-	fmt.Fprintln(os.Stderr, "Results   :", m.Stats.Results)
-	fmt.Fprintln(os.Stderr, "Time      :", m.Stats.Total)
-	fmt.Fprintln(os.Stderr, "Req/s     :", m.Stats.Eps, "\n")
+	fmt.Fprintf(os.Stderr, "> %v / %v rps\n\n", m.Stats.Total, m.Stats.Eps)
 }
 
 // Print status bar
 func printStatus() {
 	m.UpdateStats()
-	fmt.Fprintf(os.Stderr, "Status    : %d / %d (%.0f Req/s)\r", m.Stats.Execs, m.Stats.Inputs, m.Stats.Eps)
+	fmt.Fprintf(os.Stderr, "> %d / %d (%.0f Req/s)\r", m.Stats.Execs, m.Stats.Inputs, m.Stats.Eps)
 }
