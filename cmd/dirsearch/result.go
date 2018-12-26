@@ -16,11 +16,10 @@ type Result struct {
 // Print prints useful information of a result.
 func (res Result) Print() {
 	switch {
-	case res.status == http.StatusNotFound:
+	case res.status == http.StatusNotFound && !*verbose:
 		return
 
 	case res.err != nil:
-		//r.Fprintf(os.Stderr, "%v\n", res.err)
 		return
 
 	case res.status < 200:

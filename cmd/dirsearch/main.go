@@ -45,7 +45,7 @@ var (
 	timeout   = flag.Int("T", 10, "Timeout before killing the goroutine")
 	follow    = flag.Bool("f", false, "Follow redirects")
 	waf       = flag.Bool("waf", false, "Inject 'WAF bypass' headers")
-	verbose   = flag.Bool("v", false, "Verbose: print all results (except 404)")
+	verbose   = flag.Bool("v", false, "Verbose: print all results")
 	debug     = flag.Bool("vv", false, "Debug: dump bodies")
 
 	// declare this here
@@ -352,17 +352,19 @@ func main() {
 	// 1. a random request to a php file, an unnamed file, and a folder
 	// 2. a request to a sensible, non-existent hidden file
 	// 3. a request with "admin" in it
-	for _, test := range test404 {
-		x, y, err := check404(strings.Split(*base, "{")[0] + test)
-		if err != nil {
-			return
-		}
+	if !*verbose {
+		for _, test := range test404 {
+			x, y, err := check404(strings.Split(*base, "{")[0] + test)
+			if err != nil {
+				return
+			}
 
-		// add found codes and sizes to the skip list
-		if x != http.StatusOK && x != http.StatusNotFound {
-			skipCodes[x] = struct{}{}
+			// add found codes and sizes to the skip list
+			if x != http.StatusOK && x != http.StatusNotFound {
+				skipCodes[x] = struct{}{}
+			}
+			skipSizes[y] = struct{}{}
 		}
-		skipSizes[y] = struct{}{}
 	}
 
 	// add this last so it won't print
