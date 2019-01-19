@@ -148,17 +148,26 @@ func do(page, ext string) brutemachine.Printer {
 	// {SUB} : target's subdomains
 	// {HOST}: target's root domain name
 	// {TLD} : target's top-level domain or public suffix
-	// {YEAR}: current year as YYYY
-	url = strings.Replace(url, "{YEAR}", replace["year"], -1)
+	// {YYYY}: current year as YYYY
+	// {MM}  : current month as MM
+	// {DD}  : current day as DD
+	url = strings.Replace(url, "{YYYY}", replace["yyyy"], -1)
+	url = strings.Replace(url, "{YY}", replace["yy"], -1)
+	url = strings.Replace(url, "{MM}", replace["mm"], -1)
+	url = strings.Replace(url, "{DD}", replace["dd"], -1)
+
 	if replace["sub"] != "" {
 		url = strings.Replace(url, "{SUB}", replace["sub"], -1)
 	}
+
 	if replace["host"] != "" {
 		url = strings.Replace(url, "{HOST}", replace["host"], -1)
 	}
+
 	if replace["tld"] != "" {
 		url = strings.Replace(url, "{TLD}", replace["tld"], -1)
 	}
+
 	if strings.Contains(url, "{SUB}") ||
 		strings.Contains(url, "{HOST}") ||
 		strings.Contains(url, "{TLD}") {
@@ -377,7 +386,10 @@ func main() {
 		replace["host"] = x.Domain
 		replace["tld"] = x.TLD
 	}
-	replace["year"] = time.Now().Format("2006")
+	replace["yyyy"] = time.Now().Format("2006")
+	replace["yy"] = time.Now().Format("06")
+	replace["mm"] = time.Now().Format("01")
+	replace["dd"] = time.Now().Format("02")
 
 	m = brutemachine.New(*threads, *wordlist, extensions, *delay, do, onResult)
 	if err := m.Start(); err != nil {
