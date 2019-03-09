@@ -443,11 +443,11 @@ func setup() {
 // Print some stats
 func printStats() {
 	m.UpdateStats()
-	fmt.Fprintf(os.Stderr, "> %v / %v rps\n\n", m.Stats.Total, m.Stats.Eps)
+	fmt.Fprintf(os.Stderr, "[>] %v / %v rps\n\n", m.Stats.Total, m.Stats.Eps)
 }
 
 // Print status bar
 func printStatus() {
 	m.UpdateStats()
-	fmt.Fprintf(os.Stderr, "> %d / %d (%.0f Req/s)\r", m.Stats.Execs, m.Stats.Inputs, m.Stats.Eps)
+	fmt.Fprintf(os.Stderr, "[>] %d / %d (%.0f Req/s)\r", m.Stats.Execs, m.Stats.Inputs, m.Stats.Eps)
 }
